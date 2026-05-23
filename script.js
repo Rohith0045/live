@@ -22,6 +22,7 @@ const defaultData = {
 
 // State management
 let appData = JSON.parse(localStorage.getItem('cricketAppData_v2')) || defaultData;
+let editingMatchId = null;
 
 // Migration for existing data
 if (appData.profile.team === undefined) appData.profile.team = "";
@@ -49,6 +50,11 @@ function openModal(modalId) {
         document.getElementById('input-role').value = appData.profile.role;
         document.getElementById('input-team').value = appData.profile.team;
         document.getElementById('input-bio').value = appData.profile.bio;
+    } else if(modalId === 'match-modal') {
+        editingMatchId = null;
+        document.getElementById('match-form').reset();
+        document.querySelector('#match-modal h2').innerText = 'Log Recent Match';
+        document.querySelector('#match-form .submit-btn').innerText = 'Add Match';
     }
 }
 
@@ -135,13 +141,17 @@ function renderMatches() {
         const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
         item.innerHTML = `
-            <div class="match-info">
+            <div class="match-info" style="flex: 1;">
                 <h4>vs ${match.opponent}</h4>
                 <p><i class="far fa-calendar-alt"></i> ${dateStr}</p>
             </div>
-            <div class="match-stats">
+            <div class="match-stats" style="text-align: right; margin-right: 1rem;">
                 <div><span class="highlight">${match.runs}</span> Runs</div>
                 <div style="font-size: 0.9rem; color: var(--text-muted);">${match.wickets} Wickets &bull; ${match.catches} Catches &bull; ${match.runOuts} Run Outs</div>
+            </div>
+            <div class="match-actions" style="display: flex; flex-direction: column; gap: 0.5rem; justify-content: center;">
+                <button onclick="openEditMatchModal(${match.id})" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size: 1.1rem; transition: color 0.2s;" onmouseover="this.style.color='white'" onmouseout="this.style.color='var(--text-muted)'" title="Edit"><i class="fas fa-pen"></i></button>
+                <button onclick="deleteMatch(${match.id})" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size: 1.1rem; transition: color 0.2s;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#ef4444'" title="Delete"><i class="fas fa-trash"></i></button>
             </div>
         `;
         list.appendChild(item);
@@ -238,31 +248,94 @@ function handleAddMatch(e) {
     const runOuts = parseInt(document.getElementById('match-runouts').value) || 0;
     const date = document.getElementById('match-date').value;
     
-    const newMatch = {
-        id: Date.now(),
-        opponent,
-        runs,
-        wickets,
-        catches,
-        runOuts,
-        date
-    };
-    
-    appData.matches.push(newMatch);
-    
-    // Update Stats
-    appData.stats.matches += 1;
-    appData.stats.runs += runs;
-    appData.stats.wickets += wickets;
-    appData.stats.catches += catches;
-    appData.stats.runOuts += runOuts;
-    if(runs > appData.stats.highScore) {
-        appData.stats.highScore = runs;
+    if (editingMatchId) {
+        const matchIndex = appData.matches.findIndex(m => m.id === editingMatchId);
+        if(matchIndex > -1) {
+            const oldMatch = appData.matches[matchIndex];
+            
+            // Revert old stats
+            appData.stats.runs -= oldMatch.runs;
+            appData.stats.wickets -= oldMatch.wickets;
+            appData.stats.catches -= oldMatch.catches;
+            appData.stats.runOuts -= oldMatch.runOuts;
+            
+            // Add new stats
+            appData.stats.runs += runs;
+            appData.stats.wickets += wickets;
+            appData.stats.catches += catches;
+            appData.stats.runOuts += runOuts;
+            
+            appData.matches[matchIndex] = { ...oldMatch, opponent, runs, wickets, catches, runOuts, date };
+            
+            // Recalculate high score
+            appData.stats.highScore = appData.matches.reduce((max, curr) => Math.max(max, curr.runs), 0);
+        }
+        editingMatchId = null;
+    } else {
+        const newMatch = {
+            id: Date.now(),
+            opponent,
+            runs,
+            wickets,
+            catches,
+            runOuts,
+            date
+        };
+        
+        appData.matches.push(newMatch);
+        
+        // Update Stats
+        appData.stats.matches += 1;
+        appData.stats.runs += runs;
+        appData.stats.wickets += wickets;
+        appData.stats.catches += catches;
+        appData.stats.runOuts += runOuts;
+        if(runs > appData.stats.highScore) {
+            appData.stats.highScore = runs;
+        }
     }
     
     saveData();
     closeModal('match-modal');
     e.target.reset(); // Clear form
+}
+
+function openEditMatchModal(id) {
+    const m = appData.matches.find(m => m.id === id);
+    if(m) {
+        editingMatchId = id;
+        document.getElementById('match-opponent').value = m.opponent;
+        document.getElementById('match-runs').value = m.runs;
+        document.getElementById('match-wickets').value = m.wickets;
+        document.getElementById('match-catches').value = m.catches;
+        document.getElementById('match-runouts').value = m.runOuts;
+        document.getElementById('match-date').value = m.date;
+        
+        document.getElementById('match-modal').classList.add('active');
+        document.querySelector('#match-modal h2').innerText = 'Edit Match';
+        document.querySelector('#match-form .submit-btn').innerText = 'Save Changes';
+    }
+}
+
+function deleteMatch(id) {
+    if(!confirm("Are you sure you want to delete this match?")) return;
+    
+    const matchIndex = appData.matches.findIndex(m => m.id === id);
+    if(matchIndex > -1) {
+        const m = appData.matches[matchIndex];
+        appData.stats.matches -= 1;
+        appData.stats.runs -= m.runs;
+        appData.stats.wickets -= m.wickets;
+        appData.stats.catches -= m.catches;
+        appData.stats.runOuts -= m.runOuts;
+        
+        appData.matches.splice(matchIndex, 1);
+        
+        // Recalculate high score
+        appData.stats.highScore = appData.matches.reduce((max, curr) => Math.max(max, curr.runs), 0);
+        
+        saveData();
+    }
 }
 
 function handleAddAchievement(e) {
